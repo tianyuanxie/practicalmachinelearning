@@ -1,0 +1,123 @@
+---
+title: "machine learning project"
+author: "Tianyuan Xie"
+date: "December 27, 2016"
+output: html_document
+---
+
+1. Backgroud
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+2. Load data
+```{r}
+library(ggplot2)
+library(caret)
+library(e1071)
+library(randomForest)
+setwd('C:/Courses/coursera/08 Machine learning/project')
+source('multiplot.R')
+
+url_train <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+url_test <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+filename_train <- 'train.csv'
+filename_test <- 'test.csv'
+if(!file.exists(filename_train) & !file.exists(filename_test)) {
+        download.file(url_train, filename_train)
+        download.file(url_test, filename_test)
+}
+training <- read.csv(filename_train, na.strings = c('NA', ''))
+testing <- read.csv(filename_test, na.strings = c('NA', ''))
+```
+
+3. explore data
+```{r}
+dim(training)
+head(training)
+```
+
+4. data preprocessing
+remove missing value
+```{r}
+value.column <- apply(training, 2, function(x) sum(is.na(x))/dim(training)[1] < 0.8)
+# 100 columns are almost empty so remove them
+value.training <- training[, unname(value.column)]
+```
+
+The first seven columns are meaningless to model, so remove them as well. do the same thing to testing dataset
+```{r}
+value.training <- value.training[,-(1:7)]
+value.testing <- testing[, unname(value.column)]
+value.testing <- value.testing[, -(1:7)]
+```
+
+check if the variables in the training and testing dataset are the same
+```{r}
+all.equal(names(value.training)[-53], names(value.testing)[-53])
+```
+
+check zero covariates
+```{r}
+nsv <- nearZeroVar(value.training, saveMetrics = T)
+nsv
+```
+
+see the density distribution
+```{r}
+plotDen <- function(data_in, i, lab){
+        data <- data.frame(x=data_in[[i]], y=lab)
+        p <- ggplot(data= data) + geom_density(aes(x = x), size = 1,alpha = 1.0) + 
+                xlab(paste0((colnames(data_in)[i]), '\n', 'Skewness: ',round(skewness(data_in[[i]], na.rm = TRUE), 2))) + 
+                theme_light() 
+        return(p)
+}
+
+pb = list()
+for (i in 1:9) {
+        pb[[i]] <- plotDen(value.training, i, 'den')
+}
+# Plot the first nine variables' distribution
+multiplot(plotlist = pb, cols = 3)
+
+```
+
+All the skewness are calculated, the skewness correction is done. However, since the nonlinear model will be implemented. skewness correction does help to improve the model accuracy. So this step is ignored.
+
+```{r}
+# skewness calculation
+#skew <- apply(value.training[,-53], 2, skewness, na.rm = T)
+# some variables have very large skewness
+#high_skew_name <- names(value.training[,abs(unname(skew)) > 10])
+#value.training[, high_skew_name] <- apply(value.training[, high_skew_name], 2, function(x) log10(x-min(x)+1))
+```
+
+Split the training data to training and testing dataset
+```{r}
+set.seed(1234)
+inTrain <- createDataPartition(y = value.training$classe, p = 0.75, list = F)
+s.train <- value.training[inTrain,]
+s.test <- value.training[-inTrain,]
+```
+
+5. model implementation
+CART
+```{r}
+set.seed(1234)
+modelfit1 <- train(classe ~ ., method = 'rpart', data = s.train)
+pred1 <- predict(modelfit1, s.test)
+confusionMatrix(s.test$classe, pred1)
+```
+The model accuracy is around 50%, which is not acceptable.
+
+Random Forest
+```{r}
+modelfit2 <- randomForest(classe ~ .,data = s.train, trControl=trainControl(method = "cv", number = 4))
+pred2 <- predict(modelfit2, s.test)
+confusionMatrix(s.test$classe, pred2)
+```
+The random forest model shows 99% accurcy in data classification. So this algorithm is chosen to predict the class in the testing dataset.
+
+6. Testing dataset prediction
+```{r}
+predict(modelfit2, value.testing)
+```
